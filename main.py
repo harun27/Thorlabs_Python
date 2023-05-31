@@ -15,3 +15,4 @@ device1 = LTS150(portn=port, baud=baud, dest=dest, source=source,  chan_ident=ch
 device1.initialize()
 device1.update()
 
+device1.move_home()
