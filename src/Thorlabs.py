@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 from time import sleep
 
-#%%
 class LTS150:
     def __init__(self, portn="/dev/ttyUSB0", baud=115200, dest=0x50, source=1, chan_ident=1):
         self.portn=portn
@@ -39,10 +38,133 @@ class LTS150:
         for msg in unpacker:
             all_msg.append(msg)
             #print(msg)
-        all_msg=np.array(all_msg, dtype=object)
-        all_msg=pd.DataFrame(all_msg, columns=msg_list)
+        #breakpoint()
+        all_msg = np.array(all_msg, dtype=object)
+        all_msg = pd.DataFrame(all_msg, columns=msg_list)
         return all_msg
+        
+    def update(self):
+        # Update the variables by asking the device        
+        p_hardware = self.msgp_hardware()
+        self.var_serial_number = p_hardware['serial_number']
+        self.var_model_number = p_hardware['model_number']
+        self.var_type = p_hardware['type']
+        self.var_firmware_version = p_hardware['firmware_version']
+        self.var_hw_version = p_hardware['hw_version']
+        self.var_no_channels = p_hardware['nchs']
+        
+        p_velparam = self.msgp_velparam()
+        self.var_min_velocity = int(p_velparam['min_velocity'].iloc[0])
+        self.var_acceleration = int(p_velparam['acceleration'].iloc[0])
+        self.var_max_velocity = int(p_velparam['max_velocity'].iloc[0])
+    
+        p_jogparam = self.msgp_jogparam()
+        self.var_jog_mode = int(p_jogparam['jog_mode'].iloc[0])
+        self.var_jog_step_size = int(p_jogparam['step_size'].iloc[0])
+        self.var_jog_min_velocity = int(p_jogparam['min_velocity'].iloc[0])
+        self.var_jog_acceleration = int(p_jogparam['acceleration'].iloc[0])
+        self.var_jog_max_velocity = int(p_jogparam['max_velocity'].iloc[0])
+        self.var_jog_stop_mode = int(p_jogparam['stop_mode'].iloc[0])
+        
+        p_backlash = self.msgp_backlash()
+        self.var_backlash_distance = int(p_backlash['backlash_distance'].iloc[0])
+        
+        p_relmov = self.msgp_relmov()
+        self.var_relative_distance = int(p_relmov['relative_distance'].iloc[0])
+        
+        p_absmov=self.msgp_absmov()
+        self.var_absolute_position = int(p_absmov['absolute_position'].iloc[0])
+        
+        p_homeparam = self.msgp_homeparam()
+        self.var_home_direction = int(p_homeparam['home_dir'].iloc[0])
+        self.var_home_limit_switch = int(p_homeparam['limit_switch'].iloc[0])
+        self.var_home_velocity = int(p_homeparam['home_velocity'].iloc[0])
+        self.var_home_offset_distance = int(p_homeparam['offset_distance'].iloc[0])
+        
+        
+        self.jog_f()
+        sleep(2)
+        self.jog_r()
+        sleep(2)
+        p_jog=self.msgp_jog()
+        sleep(2)
+        self.var_jog_position = p_jog['position']
+        self.var_jog_velocity = p_jog['velocity'].iloc[0]
+        self.var_jog_homed = p_jog['homed'].iloc[0]
+        print('Data Updated >>>>>>>>>>>>>>>>>>>')
 
+#####################################################################################
+# High-Level Methods for working with the motor
+#####################################################################################
+# port.write(apt.mot_move_velocity(source=1, dest=0x50, chan_ident=1, direction=2))
+
+    def move_abspos(self, position):
+        # Set the object to a absolute position from 0mm to 150mm in integer
+        self.position = int(float(position)*409600)
+        self.msgs_absmov(self.position)
+        self.port.write(apt.mot_move_absolute(self.dest, self.source, self.chan_ident))
+
+    def move_reldis(self, relative_distance=1): 
+        # Shift the object relative to its current position
+        self.relative_distance = int(float(relative_distance)*409600)
+        self.msgs_relmov(relative_distance=self.relative_distance)
+        self.port.write(apt.mot_move_relative(self.dest, self.source, self.chan_ident))
+               
+    def jog_f(self):
+        self.port.write(apt.mot_move_jog(self.dest,self.source, self.chan_ident, direction=1)) # to 150
+            
+    def jog_r(self):
+        self.port.write(apt.mot_move_jog(self.dest, self.source, self.chan_ident, direction=2)) # to Home
+    
+    def stop_hard(self):
+        self.port.write(apt.mot_move_stop(self.dest, self.source, self.chan_ident, stop_mode=1))
+    
+    def stop_soft(self):
+        self.port.write(apt.mot_move_stop(self.dest, self.source, self.chan_ident, stop_mode=2))
+    
+    def disconnect(self):
+        self.port.close()
+        print('Device disconnected')
+        
+    def move_home(self):
+        self.port.write(apt.mot_move_home(self.dest, self.source, self.chan_ident))
+        
+######################################################################
+# High-Level Methods for setting simple parameters of the device
+######################################################################
+    def set_jog_vel(self, min_vel, max_vel):
+        # Give a value from 0 to 100%
+        self.var_jog_max_velocity = int((float(max_vel)/100) * 329790656);
+        self.var_jog_min_velocity = int((float(min_vel)/100) * 329790656);
+        self.msgs_jogparam(self.var_jog_step_size, self.var_jog_min_velocity, self.var_jog_acceleration, self.var_jog_max_velocity)
+        
+    def set_jog_acc(self, acc):
+        # Give the value from 0 to 100%
+        self.var_jog_acceleration = int((float(acc)/100) * 45034)
+        self.msgs_jogparam(self.var_jog_step_size, self.var_jog_min_velocity, self.var_jog_acceleration, self.var_jog_max_velocity)
+        
+    def set_jog_step_size(self, step_size):
+        # Give a value for the step size in mm
+        self.var_jog_step_size = int(float(step_size * 409600))
+        self.msgs_jogparam(self.var_jog_step_size, self.var_jog_min_velocity, self.var_jog_acceleration, self.var_jog_max_velocity)
+    
+    def set_vel(self, min_vel, max_vel):
+        # Give a value from 0 to 100%
+        self.var_min_velocity = int((float(min_vel)/100) * 329790656)
+        self.var_max_velocity = int((float(max_vel)/100) * 329790656)
+        self.msgs_velparam(self.var_min_velocity, self.var_acceleration, self.var_max_velocity)
+    
+    def set_acc(self, acc):
+        # Give the value from 0 to 100%
+        self.var_acceleration = int((float(acc)/100) * 45034)
+        self.msgs_velparam(self.var_min_velocity, self.var_acceleration, self.var_max_velocity)
+        
+    def set_home_vel(self, vel):
+        # Give the value from 0 to 100%
+        self.var_home_velocity = int((float(vel)/100) * 329790656)
+        self.msgs_homeparam(self.var_home_velocity, self.var_home_offset_distance)
+    
+    
 #####################################################
 # The following Methods are to communicate with the controller of the hardware. msgp_...-methods are to get an answer from the controller and msgs_...-methods are to send messages to the controller, with which you can change settings of the controller.
 #####################################################
@@ -113,7 +235,7 @@ class LTS150:
             'msg', 'msgid', 'dest', 'source', 'chan_ident', 'jog_mode', 'step_size', 
             'min_velocity', 'acceleration', 'max_velocity', 'stop_mode']
         # for hardwareinfo
-        self.port.write(apt.mot_req_jogparams(self.dest,self.source, self.chan_ident))
+        self.port.write(apt.mot_req_jogparams(self.dest, self.source, self.chan_ident))
         try:
             p_jogparam=self.prnt(msg_list4)
             return p_jogparam
@@ -132,10 +254,10 @@ class LTS150:
                                              self.chan_ident,
                                              jog_mode=jog_mode,
                                              step_size=step_size,
-                                             stop_mode=stop_mode,
                                              min_velocity=min_velocity,
                                              acceleration=acceleration,
-                                             max_velocity=max_velocity))
+                                             max_velocity=max_velocity,
+                                             stop_mode=stop_mode))
             
             print('Done')
         except:
@@ -241,10 +363,10 @@ class LTS150:
             self.port.write(apt.mot_set_homeparams(
                                              self.dest, self.source,
                                              self.chan_ident,
-                                              home_dir=home_dir, 
-                                              limit_switch=limit_switch, 
-                                              home_velocity=home_velocity,
-                                              offset_distance=offset_distance))                                         
+                                             home_dir=home_dir, 
+                                             limit_switch=limit_switch, 
+                                             home_velocity=home_velocity,
+                                             offset_distance=offset_distance))                                         
             print('Done homeparam')
         except:
             print('Error setting fun: msgs_homeparam')
@@ -256,7 +378,7 @@ class LTS150:
                'chan_ident','cw_hardlimit', 'ccw_hardlimit', 'cw_softlimit',
                'ccw_softlimit', 'soft_limit_mode']
         
-        self.port.write(apt.mot_req_limswitchparams(self.dest,self.source, self.chan_ident))
+        self.port.write(apt.mot_req_limswitchparams(self.dest, self.source, self.chan_ident))
         try:
             p_limitsw=self.prnt(msg_list10)
             return p_limitsw
@@ -279,127 +401,3 @@ class LTS150:
         except:
             print('Error setting fun: msgs_limitsw')
         return 0
-
-    def update(self):
-        # Update the variables by asking the device        
-        p_hardware = self.msgp_hardware()
-        self.var_serial_number = p_hardware['serial_number']
-        self.var_model_number = p_hardware['model_number']
-        self.var_type = p_hardware['type']
-        self.var_firmware_version = p_hardware['firmware_version']
-        self.var_hw_version = p_hardware['hw_version']
-        self.var_no_channels = p_hardware['nchs']
-        
-        p_velparam = self.msgp_velparam()
-        self.var_min_velocity = p_velparam['min_velocity']
-        self.var_acceleration = p_velparam['acceleration']
-        self.var_max_velocity = p_velparam['max_velocity']
-    
-        p_jogparam = self.msgp_jogparam()
-        self.var_jog_mode = p_jogparam['jog_mode']
-        self.var_jog_step_size = p_jogparam['step_size']
-        self.var_jog_min_velocity = p_jogparam['min_velocity']
-        self.var_jog_acceleration = p_jogparam['acceleration']
-        self.var_jog_max_velocity = p_jogparam['max_velocity']
-        self.var_jog_stop_mode = p_jogparam['stop_mode']
-        
-        p_backlash = self.msgp_backlash()
-        self.var_backlash_distance = p_backlash['backlash_distance']
-        
-        p_relmov = self.msgp_relmov()
-        self.var_relative_distance=p_relmov['relative_distance']
-        
-        p_absmov=self.msgp_absmov()
-        self.var_absolute_position=p_absmov['absolute_position']
-        
-        p_homeparam = self.msgp_homeparam()
-        self.var_home_direction = p_homeparam['home_dir']
-        self.var_home_limit_switch = p_homeparam['limit_switch']
-        self.var_home_velocity = p_homeparam['home_velocity']
-        self.var_home_offset_distance = p_homeparam['offset_distance']
-        
-        
-        self.jog_f()
-        sleep(2)
-        self.jog_r()
-        sleep(2)
-        p_jog=self.msgp_jog()
-        sleep(2)
-        p_jogparam = self.msgp_jogparam()
-        self.var_jog_step_size = p_jogparam['step_size']
-        self.var_jog_position = p_jog['position']
-        self.var_jog_velocity = p_jog['velocity']
-        self.var_jog_homed = p_jog['homed']
-        print('Data Updated >>>>>>>>>>>>>>>>>>>')
-
-#####################################################################################
-# Working with the motor
-#####################################################################################
-# port.write(apt.mot_move_velocity(source=1, dest=0x50, chan_ident=1, direction=2))
-
-    def move_abspos(self, position):
-        # Set the object to a absolute position from 0mm to 150mm in integer
-        self.position = int(float(position)*409600)
-        self.msgs_absmov(self.position)
-        self.port.write(apt.mot_move_absolute(self.dest, self.source, self.chan_ident))
-
-    def move_reldis(self, relative_distance=1): 
-        # Shift the object relative to its current position
-        self.relative_distance = int(float(relative_distance)*409600)
-        self.msgs_relmov(relative_distance=self.relative_distance)
-        self.port.write(apt.mot_move_relative(self.dest, self.source, self.chan_ident))
-               
-    def jog_f(self):
-        self.port.write(apt.mot_move_jog(self.dest,self.source, self.chan_ident, direction=1)) # to 150
-            
-    def jog_r(self):
-        self.port.write(apt.mot_move_jog(self.dest, self.source, self.chan_ident, direction=2)) # to Home
-    
-    def stop_hard(self):
-        self.port.write(apt.mot_move_stop(self.dest, self.source, self.chan_ident, stop_mode=1))
-    
-    def stop_soft(self):
-        self.port.write(apt.mot_move_stop(self.dest, self.source, self.chan_ident, stop_mode=2))
-    
-    def disconnect(self):
-        self.port.close()
-        print('Device disconnected')
-        
-    def move_home(self):
-        self.port.write(apt.mot_move_home(self.dest, self.source, self.chan_ident))
-        
-######################################################################
-# Setting simple parameters of the device
-######################################################################
-    def set_jog_vel(self, min_vel, max_vel):
-        # Give a value from 0 to 100%
-        self.var_jog_max_velocity = int((float(max_vel)/100) * 329790656);
-        self.var_jog_min_velocity = int((float(min_vel)/100) * 329790656);
-        self.msgs_jogparam(self.step_size, self.var_jog_min_velocity, self.var_jog_acceleration, self.var_jog_max_velocity)
-        
-    def set_jog_acc(self, acc):
-        # Give the value from 0 to 100%
-        self.var_jog_acceleration = int((float(acc)/100) * 45034)
-        self.msgs_jogparam(self.step_size, self.var_jog_min_velocity, self.var_jog_acceleration, self.var_jog_max_velocity)
-        
-    def set_jog_step_size(self, step_size):
-        # Give a value for the step size in mm
-        self.var_jog_step_size = int(float(step_size * 409600))
-        self.msgs_jogparam(self.step_size, self.var_jog_min_velocity, self.var_jog_acceleration, self.var_jog_max_velocity)
-    
-    def set_vel(self, min_vel, max_vel):
-        # Give a value from 0 to 100%
-        self.var_min_velocity = int((float(min_vel)/100) * 329790656)
-        self.var_max_velocity = int((float(max_vel)/100) * 329790656)
-        self.msgs_velparam(self.var_min_velocity, self.var_acceleration, self.var_max_velocity)
-    
-    def set_acc(self, acc):
-        # Give the value from 0 to 100%
-        self.var_acceleration = int((float(acc)/100) * 45034)
-        self.msgs_velparam(self.var_min_velocity, self.var_acceleration, self.var_max_velocity)
-        
-    def set_home_vel(self, vel):
-        # Give the value from 0 to 100%
-        self.var_home_velocity = int((float(vel)/100) * 329790656)
-        self.msgs_homeparam(self.var_home_velocity, self.var_home_offset_distance)
-    
